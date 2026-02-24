@@ -4,11 +4,24 @@ import hashlib
 import hmac
 import json
 import logging
+import socket
 import time
 
 import requests
+import urllib3
+from requests.adapters import HTTPAdapter
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class IPv4Adapter(HTTPAdapter):
+    def send(self, *args, **kwargs):
+        old = urllib3.util.connection.allowed_gai_family
+        urllib3.util.connection.allowed_gai_family = lambda: socket.AF_INET
+        try:
+            return super().send(*args, **kwargs)
+        finally:
+            urllib3.util.connection.allowed_gai_family = old
 
 
 # Signature algorithm.
@@ -38,6 +51,9 @@ class TuyaCloudApi:
         self._user_id = user_id
         self._access_token = ""
         self.device_list = {}
+
+        self._session = requests.Session()
+        self._session.mount("https://", IPv4Adapter())
 
     def generate_payload(self, method, timestamp, url, headers, body=None):
         """Generate signed payload for requests."""
@@ -77,11 +93,11 @@ class TuyaCloudApi:
 
         if method == "GET":
             func = functools.partial(
-                requests.get, full_url, headers=dict(default_par, **headers)
+                self._session.get, full_url, headers=dict(default_par, **headers)
             )
         elif method == "POST":
             func = functools.partial(
-                requests.post,
+                self._session.post,
                 full_url,
                 headers=dict(default_par, **headers),
                 data=json.dumps(body),
@@ -89,7 +105,7 @@ class TuyaCloudApi:
             # _LOGGER.debug("BODY: [%s]", body)
         elif method == "PUT":
             func = functools.partial(
-                requests.put,
+                self._session.put,
                 full_url,
                 headers=dict(default_par, **headers),
                 data=json.dumps(body),
