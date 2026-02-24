@@ -5,23 +5,39 @@ import hmac
 import json
 import logging
 import socket
+import threading
 import time
 
 import requests
-import urllib3
+import urllib3.util.connection
 from requests.adapters import HTTPAdapter
 
 _LOGGER = logging.getLogger(__name__)
 
+# Thread-local flag so each executor thread can independently request IPv4-only
+# DNS resolution without mutating a process-global function per request.
+_thread_local = threading.local()
+_orig_allowed_gai_family = urllib3.util.connection.allowed_gai_family
+
+
+def _thread_local_allowed_gai_family():
+    """Return AF_INET for this thread when IPv4-only mode is active."""
+    if getattr(_thread_local, "force_ipv4", False):
+        return socket.AF_INET
+    return _orig_allowed_gai_family()
+
+
+# Single, one-time replacement — no per-request global mutation.
+urllib3.util.connection.allowed_gai_family = _thread_local_allowed_gai_family
+
 
 class IPv4Adapter(HTTPAdapter):
     def send(self, *args, **kwargs):
-        old = urllib3.util.connection.allowed_gai_family
-        urllib3.util.connection.allowed_gai_family = lambda: socket.AF_INET
+        _thread_local.force_ipv4 = True
         try:
             return super().send(*args, **kwargs)
         finally:
-            urllib3.util.connection.allowed_gai_family = old
+            _thread_local.force_ipv4 = False
 
 
 # Signature algorithm.
