@@ -55,6 +55,15 @@ class TuyaCloudApi:
         self._session = requests.Session()
         self._session.mount("https://", IPv4Adapter())
 
+    def close(self):
+        """Close underlying HTTP session."""
+        if self._session is not None:
+            self._session.close()
+
+    async def async_close(self):
+        """Asynchronously close underlying HTTP session."""
+        await self._hass.async_add_executor_job(self.close)
+
     def generate_payload(self, method, timestamp, url, headers, body=None):
         """Generate signed payload for requests."""
         payload = self._client_id + self._access_token + timestamp
